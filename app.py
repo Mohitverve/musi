@@ -1,12 +1,13 @@
 import os
 import uuid
 from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from pydub import AudioSegment
-from flask_cors import CORS
 
+# Create the Flask app first
 app = Flask(__name__)
-CORS(app)  # Enable Cross-Origin Resource Sharing
+CORS(app)
 
 # Set up uploads folder
 UPLOAD_FOLDER = os.path.join(os.getcwd(), "uploads")
@@ -22,13 +23,11 @@ def upload():
     if file.filename == "":
         return jsonify({"error": "No selected file"}), 400
 
-    # Create a secure, unique filename
     filename = secure_filename(file.filename)
     unique_filename = f"{uuid.uuid4().hex}_{filename}"
     filepath = os.path.join(app.config["UPLOAD_FOLDER"], unique_filename)
     file.save(filepath)
 
-    # Return a URL to access the file (relative to the server)
     file_url = f"/uploads/{unique_filename}"
     return jsonify({"url": file_url})
 
@@ -42,14 +41,12 @@ def remix():
     if not data or "urls" not in data:
         return jsonify({"error": "No file URLs provided"}), 400
 
-
     urls = data["urls"]
     combined = None
 
     try:
         # Concatenate all audio clips in the provided order
         for url in urls:
-            # Expecting URL format like "/uploads/filename.ext"
             filename = url.lstrip("/")
             filepath = os.path.join(os.getcwd(), filename)
             if not os.path.exists(filepath):
@@ -70,24 +67,28 @@ def remix():
                 return jsonify({"error": f"Background file not found: {bg_filepath}"}), 404
 
             bg_segment = AudioSegment.from_file(bg_filepath)
-            # Lower the background volume
-            bg_segment = bg_segment - 15  
+            bg_segment = bg_segment - 15  # Lower volume
             # Loop the background track to cover the entire combined duration
             loop_count = int(len(combined) / len(bg_segment)) + 1
             bg_loop = bg_segment * loop_count
             bg_loop = bg_loop[:len(combined)]
-            # Overlay the voice clips on top of the background music
+            # Overlay voice clips on the background
             final_audio = bg_loop.overlay(combined)
         else:
             final_audio = combined
 
-        # Export the final remix to a new file
+        # Export the final remix
         output_filename = f"{uuid.uuid4().hex}_remix.mp3"
         output_path = os.path.join(UPLOAD_FOLDER, output_filename)
         final_audio.export(output_path, format="mp3")
+
         return send_file(output_path, as_attachment=True, download_name="remix.mp3")
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Finally, run the app
 if __name__ == "__main__":
-    app.run(debug=True)
+    # If deploying to a platform like Railway, do:
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
